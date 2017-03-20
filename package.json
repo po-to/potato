@@ -1,0 +1,31 @@
+{
+  "name": "@po-to/tomato",
+  "version": "0.1.0",
+  "description": "The web interaction framework for browser",
+  "homepage": "http://www.po-to.org",
+  "main": "tomato.js",
+  "types": "tomato.d.ts",
+  "scripts": {
+    "start": "gulp"
+  },
+  "author": "po-to <po-to@qq.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/po-to/tomato"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/cookie": "^0.1.29",
+    "@types/node": "^6.0.49",
+    "@types/request": "0.0.36",
+    "gulp": "^3.9.1",
+    "gulp-rename": "^1.2.2",
+    "gulp-typedoc": "^2.0.2",
+    "gulp-typescript": "^3.1.5",
+    "gulp-uglify": "^2.1.0",
+    "merge2": "^1.0.3",
+    "typedoc": "^0.5.7",
+    "typescript": "^2.2.1"
+  }
+}
