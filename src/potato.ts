@@ -19,11 +19,11 @@ export interface IControllers {
     hasController(con: string): boolean;
 }
 export interface IRequest {
-    namespace: string;
-    controller: string;
-    action: string;
-    path?: string;
-    args?:{ [key: string]: any };
+    readonly namespace: string;
+    readonly controller: string;
+    readonly action: string;
+    readonly path?: string;
+    args:{ [key: string]: any };
     url?:string;
 }
 export interface IViewTpl {
@@ -32,7 +32,7 @@ export interface IViewTpl {
 }
 export interface IViewSource {
     namespace: string;
-    source:string;
+    source:IViewRenderer;
 }
 export interface IViewRenderer{
     namespace: string;
@@ -64,23 +64,28 @@ export class ViewTpl implements IViewTpl {
 }
 export class ViewSource implements IViewSource {
     public readonly namespace = IViewSourceNamespace;
-    constructor(public readonly source: string, public readonly data:any) {}
+    constructor(public readonly source: IViewRenderer) {}
 }
 export class ViewRenderer implements IViewRenderer {
     public readonly namespace: string = IViewRendererNamespace;
     constructor(public template: string | IViewTpl, public data: any = '', public renderer: string = 'renderer') {}
 
 }
+export function makeView(template: string | IViewTpl, data: any = '', options?:{[key:string]:any} ,renderer: string = 'renderer'):ViewSource|ViewRenderer{
+    let viewRenderer = new ViewRenderer(template,data,renderer);
+    if(options){
+        let viewSource = new ViewSource(viewRenderer);
+        Object.assign(viewSource, options);
+        return viewSource;
+    }else{
+        return viewRenderer;
+    }
+}
 export class Request implements IRequest {
     public readonly namespace: string = IRequestNamespace;
     public beCache:boolean = false;
-    constructor(public parent: Request, public controller: string, public action: string, public path?: string, public args?:{ [key: string]: any }|undefined, public url?:string) {
-        if (!args || !Object.keys(args).length) {
-            this.args = undefined;
-        }else{
-            this.args = args;
-        }
-    }
+    public url?:string;
+    constructor(public parent: Request, public readonly controller: string, public readonly action: string, public readonly path?: string, public args:{ [key: string]: any }={}) {}
     // createViewRender(data?: { [key: string]: any }): { [key: string]: any } {
     //     return Object.assign({
     //         VPID: this.root.core.toUrl(this)
@@ -133,6 +138,7 @@ class RootRequest extends Request {
     constructor(controller: string, action: string, path: string, args: any,  private core: Core, private request: http.IncomingMessage, private response: http.ServerResponse) {
         super({} as any, controller, action, path, args);
         this.parent = this;
+        this.url = request.url;
     }
     getRoot():Request{
         return this;
@@ -195,6 +201,33 @@ export class PError extends Error{
     }
 }
 
+
+export class Controller {
+    protected filter<T>(target: T, ...objs) :T{
+        let data = {};
+        function copy(target, data, obj){
+            for(let key in target){
+                if(data.hasOwnProperty(key)){
+                    if(typeof target[key] == "object"){
+                        copy(target[key],data[key], obj);
+                    }else{
+                        obj[key] = data[key];
+                    }
+                }
+            }
+        }
+        for (let obj of objs) {
+            copy(target,obj,data)
+        }
+        return data as T;
+    }
+    __args_Action(ars:{[key:string]:any},request:Request):{[key:string]:any}{
+        return {};
+    }
+    Action(request: Request, args:{[key:string]:any}, resolve: (data: any) => void, reject: (error: Error) => void){
+
+    }
+};
 
 export class Core {
     protected readonly _views: IViews;
@@ -315,7 +348,12 @@ export class Core {
             if (obj) {
                 //request.beCache = obj.controller.__beCache(request);
                 if (internal || this.checkPermission(request)) {
-                    obj.controller[obj.action](request, resolve, reject);
+                    if(obj.controller['__args_'+obj.action]){
+                        request.args = obj.controller['__args_'+obj.action](request.args,request);
+                    }else{
+                        request.args = {};
+                    }
+                    obj.controller[obj.action](request, request.args, resolve, reject);
                 } else {
                     reject(new Error('403'));
                 }
@@ -350,6 +388,8 @@ export class Core {
                 }
             }else if(isIViewRenderer(value)){
                 return ['import!^',{template:value.template,data:value.data},'import!$'];
+            }else if(isIViewSource(value)){
+                return ['import!^',{template:value.source.template,data:value.source.data},'import!$'];
             }else{
                 return value;
             }
@@ -357,7 +397,7 @@ export class Core {
         str = str.replace(/\["import!\^",/g,'r("'+IViewRendererNamespace+'",').replace(/,"import!\$"\]/g,")");
         
         var deps = {}, i = 0;
-        var args0 = ['rendererManager'], args1 = ['r'];
+        var args0 = ['renderer'], args1 = ['r'];
         str = str.replace(/"import!(.+?)"/g, function ($0, $1) {
             if (!deps[$1]) {
                 deps[$1] = "$" + i;
@@ -386,7 +426,7 @@ export class Core {
                 }
             } else {
                 let depsValue = deps.map((url)=>{
-                    if (url == 'rendererManager') {
+                    if (url == 'renderer') {
                         return this._renderer;
                     } else if (url.startsWith("view://")) {
                         return this._views.getView(url) || url + ' not found!';
@@ -409,45 +449,44 @@ export class Core {
     loadUrl(url: string): Promise<any> | any {
         return '111';
     }
+    
     entrance(req: IHttpRequest, res: http.ServerResponse,  resolve: (data:any) => void, reject: (error: Error) => void){
         let {controller,action,path,args} = req.routing;
         Object.assign(args,req.body);
         let request = new RootRequest(controller, action, path, args, this, req, res);
-        this.executeRequest(request, false ,resolve, reject);
+        let amd = request.args.__rq__=='amd';
+        delete request.args.__rq__;
+        this.executeRequestToData(request, false, amd ,resolve, reject);
     }
     MEntrance(req: IHttpRequest, res: http.ServerResponse, next: (error?: Error) => void){
         this.entrance(req, res, function(result){
-            next();
+            res.end(result);
         },next);
     }
     toUrl(request: IRequest | IViewTpl, toAmd:boolean): string {
         if (request instanceof ViewTpl) {
             return request.path + ".js";
         } else {
-            let pathStr:string;
-            if(request.url){
-                pathStr = request.url;
-            }else{
+            if(!request.url){
+                let pathStr:string;
                 pathStr = request.controller;
                 if (request.path) {
                     pathStr += '/' + request.path;
                 }
                 pathStr += "/";
+                let args = {};
                 switch (request.action) {
-                    case "Index":
-                        break;
                     case "Item":
+                    case "ItemList":
+                        let obj = this.getAction(request.controller, request.action, true);
+                        if (obj && obj.controller['__args_'+obj.action]) {
+                            args = obj.controller['__args_'+obj.action](request.args,request);
+                        }
                         break;
                 }
+                request.url = url.format({ pathname: pathStr, query: request.args });
             }
-            
-            // if (request.isViewRequest()) {
-            //     let obj = {};
-            //     obj[this.pageArgName] = "";
-            //     obj[this.requestArgName] = this.requestAmdName;
-            //     args = Object.assign({}, (noArgs ? {} : request.args), obj)
-            // }
-            return url.format({ pathname: pathStr, query: request.args });
+            return request.url;       
         }
     }
 
@@ -502,11 +541,7 @@ export class Core {
 
 export class Model {
 };
-export class Controller {
-     __beCache(request:Request):boolean{
-        return false;
-    }
-};
+
 
 export class ApiRequest {
     constructor(public readonly context: Request, public url: string, public method?: string, public data?: { [key: string]: any } | string, public headers?: { [key: string]: string }, public render?: (data: any) => any) {
@@ -532,7 +567,7 @@ export function callApi<T>(requestOptions: ApiRequest, succss?: (data: T) => voi
             let cookiesArr: string[] = [];
             for (let key in cookies) {
                 let site = key.substr(0, key.indexOf("$"));
-                if (hostname.indexOf(site) > -1) {
+                if (site && hostname.indexOf(site) > -1) {
                     let item = cookie.serialize(key.substr(key.indexOf("$") + 1), cookies[key]);
                     cookiesArr.push(item);
                 }

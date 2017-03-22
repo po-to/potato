@@ -34,9 +34,8 @@ class ViewTpl {
 }
 exports.ViewTpl = ViewTpl;
 class ViewSource {
-    constructor(source, data) {
+    constructor(source) {
         this.source = source;
-        this.data = data;
         this.namespace = exports.IViewSourceNamespace;
     }
 }
@@ -50,22 +49,27 @@ class ViewRenderer {
     }
 }
 exports.ViewRenderer = ViewRenderer;
+function makeView(template, data = '', options, renderer = 'renderer') {
+    let viewRenderer = new ViewRenderer(template, data, renderer);
+    if (options) {
+        let viewSource = new ViewSource(viewRenderer);
+        Object.assign(viewSource, options);
+        return viewSource;
+    }
+    else {
+        return viewRenderer;
+    }
+}
+exports.makeView = makeView;
 class Request {
-    constructor(parent, controller, action, path, args, url) {
+    constructor(parent, controller, action, path, args = {}) {
         this.parent = parent;
         this.controller = controller;
         this.action = action;
         this.path = path;
         this.args = args;
-        this.url = url;
         this.namespace = exports.IRequestNamespace;
         this.beCache = false;
-        if (!args || !Object.keys(args).length) {
-            this.args = undefined;
-        }
-        else {
-            this.args = args;
-        }
     }
     // createViewRender(data?: { [key: string]: any }): { [key: string]: any } {
     //     return Object.assign({
@@ -118,6 +122,7 @@ class RootRequest extends Request {
         this.request = request;
         this.response = response;
         this.parent = this;
+        this.url = request.url;
     }
     getRoot() {
         return this;
@@ -182,6 +187,34 @@ class PError extends Error {
     }
 }
 exports.PError = PError;
+class Controller {
+    filter(target, ...objs) {
+        let data = {};
+        function copy(target, data, obj) {
+            for (let key in target) {
+                if (data.hasOwnProperty(key)) {
+                    if (typeof target[key] == "object") {
+                        copy(target[key], data[key], obj);
+                    }
+                    else {
+                        obj[key] = data[key];
+                    }
+                }
+            }
+        }
+        for (let obj of objs) {
+            copy(target, obj, data);
+        }
+        return data;
+    }
+    __args_Action(ars, request) {
+        return {};
+    }
+    Action(request, args, resolve, reject) {
+    }
+}
+exports.Controller = Controller;
+;
 class Core {
     MRouting(req, res, next) {
         let data = this.routing(req.url || '', req.method || '', {});
@@ -306,7 +339,13 @@ class Core {
             if (obj) {
                 //request.beCache = obj.controller.__beCache(request);
                 if (internal || this.checkPermission(request)) {
-                    obj.controller[obj.action](request, resolve, reject);
+                    if (obj.controller['__args_' + obj.action]) {
+                        request.args = obj.controller['__args_' + obj.action](request.args, request);
+                    }
+                    else {
+                        request.args = {};
+                    }
+                    obj.controller[obj.action](request, request.args, resolve, reject);
                 }
                 else {
                     reject(new Error('403'));
@@ -346,13 +385,16 @@ class Core {
             else if (isIViewRenderer(value)) {
                 return ['import!^', { template: value.template, data: value.data }, 'import!$'];
             }
+            else if (isIViewSource(value)) {
+                return ['import!^', { template: value.source.template, data: value.source.data }, 'import!$'];
+            }
             else {
                 return value;
             }
         });
         str = str.replace(/\["import!\^",/g, 'r("' + exports.IViewRendererNamespace + '",').replace(/,"import!\$"\]/g, ")");
         var deps = {}, i = 0;
-        var args0 = ['rendererManager'], args1 = ['r'];
+        var args0 = ['renderer'], args1 = ['r'];
         str = str.replace(/"import!(.+?)"/g, function ($0, $1) {
             if (!deps[$1]) {
                 deps[$1] = "$" + i;
@@ -381,7 +423,7 @@ class Core {
             }
             else {
                 let depsValue = deps.map((url) => {
-                    if (url == 'rendererManager') {
+                    if (url == 'renderer') {
                         return this._renderer;
                     }
                     else if (url.startsWith("view://")) {
@@ -410,11 +452,13 @@ class Core {
         let { controller, action, path, args } = req.routing;
         Object.assign(args, req.body);
         let request = new RootRequest(controller, action, path, args, this, req, res);
-        this.executeRequest(request, false, resolve, reject);
+        let amd = request.args.__rq__ == 'amd';
+        delete request.args.__rq__;
+        this.executeRequestToData(request, false, amd, resolve, reject);
     }
     MEntrance(req, res, next) {
         this.entrance(req, res, function (result) {
-            next();
+            res.end(result);
         }, next);
     }
     toUrl(request, toAmd) {
@@ -422,30 +466,26 @@ class Core {
             return request.path + ".js";
         }
         else {
-            let pathStr;
-            if (request.url) {
-                pathStr = request.url;
-            }
-            else {
+            if (!request.url) {
+                let pathStr;
                 pathStr = request.controller;
                 if (request.path) {
                     pathStr += '/' + request.path;
                 }
                 pathStr += "/";
+                let args = {};
                 switch (request.action) {
-                    case "Index":
-                        break;
                     case "Item":
+                    case "ItemList":
+                        let obj = this.getAction(request.controller, request.action, true);
+                        if (obj && obj.controller['__args_' + obj.action]) {
+                            args = obj.controller['__args_' + obj.action](request.args, request);
+                        }
                         break;
                 }
+                request.url = url.format({ pathname: pathStr, query: request.args });
             }
-            // if (request.isViewRequest()) {
-            //     let obj = {};
-            //     obj[this.pageArgName] = "";
-            //     obj[this.requestArgName] = this.requestAmdName;
-            //     args = Object.assign({}, (noArgs ? {} : request.args), obj)
-            // }
-            return url.format({ pathname: pathStr, query: request.args });
+            return request.url;
         }
     }
 }
@@ -453,13 +493,6 @@ exports.Core = Core;
 class Model {
 }
 exports.Model = Model;
-;
-class Controller {
-    __beCache(request) {
-        return false;
-    }
-}
-exports.Controller = Controller;
 ;
 class ApiRequest {
     constructor(context, url, method, data, headers, render) {
@@ -491,7 +524,7 @@ function callApi(requestOptions, succss, fail) {
             let cookiesArr = [];
             for (let key in cookies) {
                 let site = key.substr(0, key.indexOf("$"));
-                if (hostname.indexOf(site) > -1) {
+                if (site && hostname.indexOf(site) > -1) {
                     let item = cookie.serialize(key.substr(key.indexOf("$") + 1), cookies[key]);
                     cookiesArr.push(item);
                 }

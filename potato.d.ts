@@ -20,11 +20,11 @@ export interface IControllers {
     hasController(con: string): boolean;
 }
 export interface IRequest {
-    namespace: string;
-    controller: string;
-    action: string;
-    path?: string;
-    args?: {
+    readonly namespace: string;
+    readonly controller: string;
+    readonly action: string;
+    readonly path?: string;
+    args: {
         [key: string]: any;
     };
     url?: string;
@@ -35,7 +35,7 @@ export interface IViewTpl {
 }
 export interface IViewSource {
     namespace: string;
-    source: string;
+    source: IViewRenderer;
 }
 export interface IViewRenderer {
     namespace: string;
@@ -56,10 +56,9 @@ export declare class ViewTpl implements IViewTpl {
     constructor(path: string);
 }
 export declare class ViewSource implements IViewSource {
-    readonly source: string;
-    readonly data: any;
+    readonly source: IViewRenderer;
     readonly namespace: string;
-    constructor(source: string, data: any);
+    constructor(source: IViewRenderer);
 }
 export declare class ViewRenderer implements IViewRenderer {
     template: string | IViewTpl;
@@ -68,20 +67,23 @@ export declare class ViewRenderer implements IViewRenderer {
     readonly namespace: string;
     constructor(template: string | IViewTpl, data?: any, renderer?: string);
 }
+export declare function makeView(template: string | IViewTpl, data?: any, options?: {
+    [key: string]: any;
+}, renderer?: string): ViewSource | ViewRenderer;
 export declare class Request implements IRequest {
     parent: Request;
-    controller: string;
-    action: string;
-    path: string;
+    readonly controller: string;
+    readonly action: string;
+    readonly path: string;
     args: {
         [key: string]: any;
-    } | undefined;
-    url: string;
+    };
     readonly namespace: string;
     beCache: boolean;
+    url?: string;
     constructor(parent: Request, controller: string, action: string, path?: string, args?: {
         [key: string]: any;
-    } | undefined, url?: string);
+    });
     toUrl(toAmd: boolean): string;
     getCore(): Core;
     getRoot(): Request;
@@ -98,6 +100,17 @@ export declare class PError extends Error {
     readonly eid: string;
     readonly info: any;
     constructor(eid: string, info?: any);
+}
+export declare class Controller {
+    protected filter<T>(target: T, ...objs: any[]): T;
+    __args_Action(ars: {
+        [key: string]: any;
+    }, request: Request): {
+        [key: string]: any;
+    };
+    Action(request: Request, args: {
+        [key: string]: any;
+    }, resolve: (data: any) => void, reject: (error: Error) => void): void;
 }
 export declare class Core {
     protected readonly _views: IViews;
@@ -132,9 +145,6 @@ export declare class Core {
     toUrl(request: IRequest | IViewTpl, toAmd: boolean): string;
 }
 export declare class Model {
-}
-export declare class Controller {
-    __beCache(request: Request): boolean;
 }
 export declare class ApiRequest {
     readonly context: Request;
