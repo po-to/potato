@@ -6,61 +6,7 @@ const queryString = require("querystring");
 const fs = require("fs");
 const request = require("request");
 const path = require("path");
-exports.IRequestNamespace = "com.po-to/IRequest";
-exports.IViewRendererNamespace = "com.po-to/IViewRenderer";
-exports.IViewTplNamespace = "com.po-to/IViewTpl";
-exports.IViewSourceNamespace = "com.po-to/IViewSource";
-function isIViewRenderer(data) {
-    return data['namespace'] == exports.IViewRendererNamespace;
-}
-exports.isIViewRenderer = isIViewRenderer;
-function isIRequest(data) {
-    return data['namespace'] == exports.IRequestNamespace;
-}
-exports.isIRequest = isIRequest;
-function isIViewTpl(data) {
-    return data['namespace'] == exports.IViewTplNamespace;
-}
-exports.isIViewTpl = isIViewTpl;
-function isIViewSource(data) {
-    return data['namespace'] == exports.IViewSourceNamespace;
-}
-exports.isIViewSource = isIViewSource;
-class ViewTpl {
-    constructor(path) {
-        this.path = path;
-        this.namespace = exports.IViewTplNamespace;
-    }
-}
-exports.ViewTpl = ViewTpl;
-class ViewSource {
-    constructor(source) {
-        this.source = source;
-        this.namespace = exports.IViewSourceNamespace;
-    }
-}
-exports.ViewSource = ViewSource;
-class ViewRenderer {
-    constructor(template, data = '', renderer = 'renderer') {
-        this.template = template;
-        this.data = data;
-        this.renderer = renderer;
-        this.namespace = exports.IViewRendererNamespace;
-    }
-}
-exports.ViewRenderer = ViewRenderer;
-function makeView(template, data = '', options, renderer = 'renderer') {
-    let viewRenderer = new ViewRenderer(template, data, renderer);
-    if (options) {
-        let viewSource = new ViewSource(viewRenderer);
-        Object.assign(viewSource, options);
-        return viewSource;
-    }
-    else {
-        return viewRenderer;
-    }
-}
-exports.makeView = makeView;
+const vm = require("vm");
 class Request {
     constructor(parent, controller, action, path, args = {}) {
         this.parent = parent;
@@ -68,7 +14,6 @@ class Request {
         this.action = action;
         this.path = path;
         this.args = args;
-        this.namespace = exports.IRequestNamespace;
         this.beCache = false;
     }
     // createViewRender(data?: { [key: string]: any }): { [key: string]: any } {
@@ -83,8 +28,8 @@ class Request {
     //     let args = this.args || {};
     //     return args["__request__"] == "amd";
     // }
-    toUrl(toAmd) {
-        return this.getCore().toUrl(this, toAmd);
+    toUrl(toAmd, noArgs) {
+        return this.getCore().toUrl(this, toAmd, noArgs);
     }
     // getAction() {
     //     return this.getCore().getAction(this.controller, this.action, this.isInternal);
@@ -122,7 +67,7 @@ class RootRequest extends Request {
         this.request = request;
         this.response = response;
         this.parent = this;
-        this.url = request.url;
+        this.url = (request.url || "").replace(/^\//, '').replace(/__rq__=.*?(&|$)/g, '').replace(/[?&]$/, '');
     }
     getRoot() {
         return this;
@@ -215,17 +160,174 @@ class Controller {
 }
 exports.Controller = Controller;
 ;
-class Core {
-    MRouting(req, res, next) {
-        let data = this.routing(req.url || '', req.method || '', {});
-        if (data) {
-            req['routing'] = data;
-            next();
+function MRouting(req, res, next) {
+    let data = core.routing(req.url || '', req.method || '', {});
+    if (data) {
+        req['routing'] = data;
+        next();
+    }
+    else {
+        next(new Error('404 not found!'));
+    }
+}
+exports.MRouting = MRouting;
+function MEntrance(req, res, next) {
+    core.entrance(req, res, function (result) {
+        res.end(result);
+    }, next);
+}
+exports.MEntrance = MEntrance;
+function responseNotFound(res) {
+    res.statusCode = 404;
+}
+function responseError(res) {
+}
+class AMD {
+    constructor(...args) {
+        if (args.length === 3) {
+            this.id = args[0];
+            this.dependencies = args[1];
+            this.callback = args[2];
+        }
+        else if (args.length === 2) {
+            if (typeof args[0] == "string") {
+                this.id = args[0];
+                this.dependencies = [];
+            }
+            else {
+                this.id = '';
+                this.dependencies = args[0];
+            }
+            this.callback = args[1];
+        }
+        else if (args.length = 1) {
+            this.id = '';
+            this.dependencies = [];
+            this.callback = args[0];
         }
         else {
-            next(new Error('404 not found!'));
+            this.id = '';
+            this.dependencies = [];
+            this.callback = '';
         }
     }
+}
+exports.AMD = AMD;
+function define(...args) {
+    let id, dependencies, callback, result;
+    if (args.length === 3) {
+        id = args[0];
+        dependencies = args[1];
+        callback = args[2];
+    }
+    else if (args.length === 2) {
+        if (typeof args[0] == "string") {
+            id = args[0];
+            dependencies = [];
+        }
+        else {
+            id = '';
+            dependencies = args[0];
+        }
+        callback = args[1];
+    }
+    else if (args.length = 1) {
+        id = '';
+        dependencies = [];
+        callback = args[0];
+    }
+    else {
+        id = '';
+        dependencies = [];
+        callback = function () { };
+    }
+    if (typeof callback == "function") {
+        if (dependencies.length) {
+            let deps = dependencies.map((item) => {
+                if (item instanceof Request) {
+                    return core.executeRequestToData(item, true, false);
+                }
+                else if (typeof item == "string") {
+                    return requireAmd(item);
+                }
+                else {
+                    return item;
+                }
+            });
+            if (deps.some(function (item) {
+                return item instanceof Promise;
+            })) {
+                result = Promise.all(deps).then(function (values) {
+                    let result = callback(...values);
+                    if (id) {
+                        amdCaches[id] = result;
+                    }
+                    return result;
+                }, function (error) {
+                    if (id) {
+                        delete amdCaches[id];
+                    }
+                    throw error;
+                });
+            }
+            else {
+                result = callback(...deps);
+            }
+        }
+        else {
+            result = callback();
+        }
+    }
+    else {
+        result = callback;
+    }
+    amdCaches['.'] = result;
+    if (id) {
+        amdCaches[id] = result;
+    }
+}
+define['amd'] = true;
+let core;
+let amdCaches = {};
+let amdPaths = {};
+function setConfig(options) {
+    if (options.core) {
+        core = options.core;
+    }
+    ;
+    if (options.amdPaths) {
+        amdPaths = options.amdPaths;
+    }
+    if (options.amdCaches) {
+        Object.assign(amdCaches, options.amdCaches);
+    }
+}
+exports.setConfig = setConfig;
+let amdSandbox = vm.createContext({ define: define, requireAmd: requireAmd, amdCaches: amdCaches, amdPaths: amdPaths, console: console });
+function requireAmd(id) {
+    for (let key in amdPaths) {
+        if (id.startsWith(key)) {
+            id = id.replace(key, amdPaths[key]);
+        }
+    }
+    if (amdCaches[id]) {
+        return amdCaches[id];
+    }
+    else {
+        return new Promise(function (resolve, reject) {
+            request(id, function (error, response, body) {
+                if (!error && response.statusCode == 200) {
+                    vm.runInContext(body, amdSandbox);
+                    resolve(amdCaches['.']);
+                }
+                else {
+                    reject(new Error(id + " is not found!"));
+                }
+            });
+        });
+    }
+}
+class Core {
     routing(str, method, data) {
         let urlData = url.parse(str, true);
         let pathname = urlData.pathname || '';
@@ -354,99 +456,59 @@ class Core {
             else {
                 reject(new Error('404'));
             }
-        }).then(success, failure).catch(failure);
+        }).then(success, failure);
     }
     executeRequestToData(request, internal, toAmd, success, failure) {
         return this.executeRequest(request, internal).then((data) => {
-            return this.renderToData(request, data, toAmd);
-        }).then(success, failure).catch(failure);
-    }
-    parseResult(request, data, toAmd) {
-        var atta = [];
-        var str = JSON.stringify(data, (key, value) => {
-            if (isIRequest(value)) {
+            if (data instanceof AMD) {
                 if (toAmd) {
-                    let tempUrl = value.controller;
-                    return 'import!' + this.toUrl(value, toAmd);
-                }
-                else {
-                    atta.push((value instanceof Request) ? value : new Request(request, value.controller, value.action, value.path, value.args));
-                    return 'import!req://' + (atta.length - 1);
-                }
-            }
-            else if (isIViewTpl(value)) {
-                if (toAmd) {
-                    return 'import!' + this.toUrl(value, toAmd);
-                }
-                else {
-                    return 'import!view://' + value.path;
-                }
-            }
-            else if (isIViewRenderer(value)) {
-                return ['import!^', { template: value.template, data: value.data }, 'import!$'];
-            }
-            else if (isIViewSource(value)) {
-                return ['import!^', { template: value.source.template, data: value.source.data }, 'import!$'];
-            }
-            else {
-                return value;
-            }
-        });
-        str = str.replace(/\["import!\^",/g, 'r("' + exports.IViewRendererNamespace + '",').replace(/,"import!\$"\]/g, ")");
-        var deps = {}, i = 0;
-        var args0 = ['renderer'], args1 = ['r'];
-        str = str.replace(/"import!(.+?)"/g, function ($0, $1) {
-            if (!deps[$1]) {
-                deps[$1] = "$" + i;
-                i++;
-            }
-            return deps[$1];
-        });
-        for (let url in deps) {
-            args0.push(url);
-            args1.push(deps[url]);
-        }
-        let fbody = 'return ' + str;
-        args1.push(fbody);
-        return { deps: args0, callback: new Function(...args1), atta: atta };
-    }
-    renderToData(request, data, toAmd, success, failure) {
-        return new Promise((resolve, reject) => {
-            let { deps, callback, atta } = this.parseResult(request, data, toAmd);
-            if (toAmd) {
-                if (deps.length) {
-                    resolve('define(["' + deps.join('","') + '"],' + callback.toString() + ');');
-                }
-                else {
-                    resolve('define(' + callback.toString() + ');');
-                }
-            }
-            else {
-                let depsValue = deps.map((url) => {
-                    if (url == 'renderer') {
-                        return this._renderer;
-                    }
-                    else if (url.startsWith("view://")) {
-                        return this._views.getView(url) || url + ' not found!';
-                    }
-                    else if (url.startsWith("req://")) {
-                        let index = parseInt(url.substr("req://".length));
-                        return this.executeRequestToData(atta[index], true, toAmd);
+                    let funs = 'define(' + (data.id ? '"' + data.id + '",' : '');
+                    if (data.dependencies.length) {
+                        if (typeof data.callback == 'function') {
+                            let arr = data.callback.toString().match(/(^[^(]+\()([^)]+)([^{]+\{)([\s\S]+$)/);
+                            if (arr) {
+                                let oargs = arr[2].split(',');
+                                let args = [];
+                                let deps = data.dependencies.map(function (item, index) {
+                                    if (typeof item == "string") {
+                                        return item;
+                                    }
+                                    else if (item instanceof Request) {
+                                        return item.toUrl(true, false);
+                                    }
+                                    else {
+                                        args.push(oargs[index] + '=' + JSON.stringify(item));
+                                        return '';
+                                    }
+                                });
+                                args.push("");
+                                funs += JSON.stringify(deps) + ",";
+                                funs += arr[1] + arr[2] + arr[3] + "\r\n" + args.join(";\r\n") + arr[4];
+                            }
+                        }
+                        else {
+                            funs += JSON.stringify(data.callback);
+                        }
                     }
                     else {
-                        return this.loadUrl(url);
+                        funs += (typeof data.callback == 'function') ? data.callback.toString() : JSON.stringify(data.callback);
                     }
-                });
-                Promise.all(depsValue).then(function (values) {
-                    resolve(callback(...values));
-                }).catch(function (error) {
-                    reject(error);
-                });
+                    return funs;
+                }
+                else {
+                    define(data.id, data.dependencies, data.callback);
+                    return amdCaches['.'];
+                }
             }
-        }).then(success, failure).catch(failure);
-    }
-    loadUrl(url) {
-        return '111';
+            else {
+                if (toAmd) {
+                    return 'define(' + JSON.stringify(data) + ')';
+                }
+                else {
+                    return data;
+                }
+            }
+        }).then(success, failure);
     }
     entrance(req, res, resolve, reject) {
         let { controller, action, path, args } = req.routing;
@@ -456,36 +518,35 @@ class Core {
         delete request.args.__rq__;
         this.executeRequestToData(request, false, amd, resolve, reject);
     }
-    MEntrance(req, res, next) {
-        this.entrance(req, res, function (result) {
-            res.end(result);
-        }, next);
-    }
-    toUrl(request, toAmd) {
-        if (request instanceof ViewTpl) {
-            return request.path + ".js";
+    toUrl(request, toAmd, noArgs) {
+        if (!request.url) {
+            let pathStr;
+            pathStr = request.controller;
+            if (request.path) {
+                pathStr += '/' + request.path;
+            }
+            pathStr += "/";
+            let args = {};
+            switch (request.action) {
+                case "Item":
+                case "ItemList":
+                    let obj = this.getAction(request.controller, request.action, true);
+                    if (obj && obj.controller['__args_' + obj.action]) {
+                        args = obj.controller['__args_' + obj.action](request.args, request);
+                    }
+                    break;
+            }
+            request.url = url.format({ pathname: pathStr, query: request.args });
+        }
+        let str = request.url;
+        if (noArgs) {
+            str = str.split("?")[0];
+        }
+        if (toAmd) {
+            return str + (str.indexOf("?") > -1 ? "&" : "?") + "__rq__=amd";
         }
         else {
-            if (!request.url) {
-                let pathStr;
-                pathStr = request.controller;
-                if (request.path) {
-                    pathStr += '/' + request.path;
-                }
-                pathStr += "/";
-                let args = {};
-                switch (request.action) {
-                    case "Item":
-                    case "ItemList":
-                        let obj = this.getAction(request.controller, request.action, true);
-                        if (obj && obj.controller['__args_' + obj.action]) {
-                            args = obj.controller['__args_' + obj.action](request.args, request);
-                        }
-                        break;
-                }
-                request.url = url.format({ pathname: pathStr, query: request.args });
-            }
-            return request.url;
+            return str;
         }
     }
 }

@@ -5,6 +5,9 @@ import queryString = require("querystring");
 import fs = require('fs');
 import request = require('request');
 import path = require('path');
+import vm = require("vm");
+
+//var Script = process.binding('evals').NodeScript; 
 
 export interface IHttpRequest extends http.IncomingMessage{
     body : {[key:string]:any},
@@ -12,77 +15,21 @@ export interface IHttpRequest extends http.IncomingMessage{
 }
 export interface IViews {
     getView(con: string): string | null;
-    hasView(con: string): boolean;
 }
 export interface IControllers {
     getController(con: string): Controller | null;
-    hasController(con: string): boolean;
-}
-export interface IRequest {
-    readonly namespace: string;
-    readonly controller: string;
-    readonly action: string;
-    readonly path?: string;
-    args:{ [key: string]: any };
-    url?:string;
-}
-export interface IViewTpl {
-    namespace: string;
-    path:string;
-}
-export interface IViewSource {
-    namespace: string;
-    source:IViewRenderer;
-}
-export interface IViewRenderer{
-    namespace: string;
-    template: string|IViewTpl;
-    data: any;
 }
 
-export const IRequestNamespace: string = "com.po-to/IRequest";
-export const IViewRendererNamespace: string = "com.po-to/IViewRenderer";
-export const IViewTplNamespace: string = "com.po-to/IViewTpl";
-export const IViewSourceNamespace: string = "com.po-to/IViewSource";
 
-export function isIViewRenderer(data:Object):data is IViewRenderer{
-    return data['namespace'] == IViewRendererNamespace;
-}
-export function isIRequest(data:Object):data is IRequest{
-    return data['namespace'] == IRequestNamespace;
-}
-export function isIViewTpl(data:Object):data is IViewTpl{
-    return data['namespace'] == IViewTplNamespace;
-}
-export function isIViewSource(data:Object):data is IViewSource{
-    return data['namespace'] == IViewSourceNamespace;
-}
 
-export class ViewTpl implements IViewTpl {
-    public readonly namespace = IViewTplNamespace;
-    constructor(public readonly path: string) {}
-}
-export class ViewSource implements IViewSource {
-    public readonly namespace = IViewSourceNamespace;
-    constructor(public readonly source: IViewRenderer) {}
-}
-export class ViewRenderer implements IViewRenderer {
-    public readonly namespace: string = IViewRendererNamespace;
-    constructor(public template: string | IViewTpl, public data: any = '', public renderer: string = 'renderer') {}
 
-}
-export function makeView(template: string | IViewTpl, data: any = '', options?:{[key:string]:any} ,renderer: string = 'renderer'):ViewSource|ViewRenderer{
-    let viewRenderer = new ViewRenderer(template,data,renderer);
-    if(options){
-        let viewSource = new ViewSource(viewRenderer);
-        Object.assign(viewSource, options);
-        return viewSource;
-    }else{
-        return viewRenderer;
-    }
-}
-export class Request implements IRequest {
-    public readonly namespace: string = IRequestNamespace;
+
+
+
+
+
+
+export class Request {
     public beCache:boolean = false;
     public url?:string;
     constructor(public parent: Request, public readonly controller: string, public readonly action: string, public readonly path?: string, public args:{ [key: string]: any }={}) {}
@@ -98,8 +45,8 @@ export class Request implements IRequest {
     //     let args = this.args || {};
     //     return args["__request__"] == "amd";
     // }
-    toUrl(toAmd:boolean): string {
-        return this.getCore().toUrl(this,toAmd);
+    toUrl(toAmd?:boolean, noArgs?:boolean): string {
+        return this.getCore().toUrl(this,toAmd,noArgs);
     }
     // getAction() {
     //     return this.getCore().getAction(this.controller, this.action, this.isInternal);
@@ -138,7 +85,7 @@ class RootRequest extends Request {
     constructor(controller: string, action: string, path: string, args: any,  private core: Core, private request: http.IncomingMessage, private response: http.ServerResponse) {
         super({} as any, controller, action, path, args);
         this.parent = this;
-        this.url = request.url;
+        this.url = (request.url||"").replace(/^\//,'').replace(/__rq__=.*?(&|$)/g,'').replace(/[?&]$/,'');
     }
     getRoot():Request{
         return this;
@@ -229,20 +176,181 @@ export class Controller {
     }
 };
 
-export class Core {
-    protected readonly _views: IViews;
-    protected readonly _controllers: IControllers;
-    protected readonly _renderer: (namespace:string ,{template: string, data: any}) => string;
+export function MRouting(req: http.IncomingMessage, res: http.ServerResponse, next: (error?: Error) => void) {
+    let data = core.routing(req.url||'', req.method||'', {}); 
+    if(data){
+        req['routing'] = data;
+        next();
+    }else{
+        next(new Error('404 not found!'));
+    }
+}
+export function MEntrance(req: IHttpRequest, res: http.ServerResponse, next: (error?: Error) => void){
+    core.entrance(req, res, function(result){
+        res.end(result);
+    },next);
+}
+
+function responseNotFound(res: http.ServerResponse){
+    res.statusCode = 404
+}
+function responseError(res: http.ServerResponse){
     
-    MRouting(req: http.IncomingMessage, res: http.ServerResponse, next: (error?: Error) => void) { 
-        let data = this.routing(req.url||'', req.method||'', {}); 
-        if(data){
-            req['routing'] = data;
-            next();
+}
+export class AMD{
+    public id:string;
+    public dependencies:any[];
+    public callback:any;
+
+    constructor(callback:any);
+    constructor(id:string,callback:any);
+    constructor(dependencies:any[], callback:any);
+    constructor(id:string, dependencies:any[], callback:any);
+    constructor(...args){
+        if(args.length===3){
+            this.id = args[0];
+            this.dependencies = args[1];
+            this.callback = args[2];
+        }else if(args.length===2){
+            if(typeof args[0]=="string"){
+                this.id = args[0];
+                this.dependencies = [];
+            }else{
+                this.id = '';
+                this.dependencies = args[0];
+            }
+            this.callback = args[1];
+        }else if(args.length = 1){
+            this.id = '';
+            this.dependencies = [];
+            this.callback = args[0];
         }else{
-            next(new Error('404 not found!'));
+            this.id = '';
+            this.dependencies = [];
+            this.callback = '';
         }
     }
+}
+
+
+
+function define(callback:any);
+function define(id:string,callback:any);
+function define(dependencies:any[], callback:any);
+function define(id:string, dependencies:any[], callback:any);
+function define(...args){
+    let id:string, dependencies:any[], callback:any, result:any;
+    if(args.length===3){
+        id = args[0];
+        dependencies = args[1];
+        callback = args[2];
+    }else if(args.length===2){
+        if(typeof args[0]=="string"){
+            id = args[0];
+            dependencies = [];
+        }else{
+            id = '';
+            dependencies = args[0];
+        }
+         callback = args[1]
+    }else if(args.length = 1){
+        id = '';
+        dependencies = [];
+        callback = args[0];
+    }else{
+        id = '';
+        dependencies = [];
+        callback = function(){};
+    }
+    if(typeof callback == "function"){
+        if(dependencies.length){
+            let deps = dependencies.map((item)=>{
+                if(item instanceof Request){
+                    return core.executeRequestToData(item, true, false);
+                }else if(typeof item == "string"){
+                    return requireAmd(item);
+                }else{
+                    return item;
+                }
+            });
+            if(deps.some(function(item){
+                return item instanceof Promise;
+            })){
+                result = Promise.all(deps).then(function (values: any[]) {
+                        let result = callback(...values);
+                        if(id){
+                            amdCaches[id] = result;
+                        }
+                        return result;
+                    },function(error){
+                        if(id){
+                            delete amdCaches[id];
+                        }
+                        throw error;
+                    })
+            }else{
+                result = callback(...deps);
+            }
+        }else{
+            result = callback();
+        }
+    }else{
+        result = callback;
+    }
+    amdCaches['.'] = result;
+    if(id){
+        amdCaches[id] = result;
+    }
+}
+
+define['amd'] = true;
+
+let core:Core;
+let amdCaches:{[id:string]:any|Promise<any>} = {};
+let amdPaths:{[key:string]:string} = {};
+
+export function setConfig(options:{
+    core?:Core,
+    amdPaths?:{[key:string]:string},
+    amdCaches?:{[key:string]:any}
+}){
+    if(options.core){core = options.core};
+    if(options.amdPaths){amdPaths = options.amdPaths;}
+    if(options.amdCaches){Object.assign(amdCaches,options.amdCaches);}
+}
+let amdSandbox = vm.createContext({ define: define, requireAmd:requireAmd, amdCaches:amdCaches, amdPaths:amdPaths, console:console });
+
+function requireAmd(id:string):any|Promise<any>{
+    for(let key in amdPaths){
+        if(id.startsWith(key)){
+            id = id.replace(key,amdPaths[key]);
+        }
+    }
+    if(amdCaches[id]){
+        return amdCaches[id];
+    }else{
+        return new Promise(function (resolve, reject) {
+            request(id,function(error, response, body){
+                if (!error && response.statusCode == 200) {
+                    vm.runInContext(body,amdSandbox)
+                    resolve(amdCaches['.']);
+                }else{
+                    reject(new Error(id+" is not found!"));
+                }
+            })
+        });
+    }
+}
+
+
+
+
+
+export class Core {
+
+    protected readonly _views: IViews;
+    protected readonly _controllers: IControllers;
+    
     routing(str: string, method: string, data?: any): {controller:string, action:string, path:string, args:any} | null {
         let urlData = url.parse(str, true);
         let pathname = urlData.pathname || '';
@@ -339,7 +447,7 @@ export class Core {
     hasAction(controller: string, action: string, isInternal: boolean): boolean {
         return !!this.getAction(controller, action, isInternal);
     }
-    checkPermission(request: IRequest): boolean {
+    checkPermission(request: Request): boolean {
         return true;
     }
     executeRequest<T>(request: Request, internal:boolean, success?: (data:T) => void, failure?: (error: Error) => void): Promise<T> {
@@ -360,94 +468,54 @@ export class Core {
             } else {
                 reject(new Error('404'));
             }
-        }).then(success,failure).catch(failure);
+        }).then(success,failure);
     }
     executeRequestToData<T>(request: Request, internal:boolean, toAmd:boolean, success?: (data:T) => void, failure?: (error: Error) => void): Promise<T> {
         return this.executeRequest<any>(request,internal).then(
             (data)=>{
-                return this.renderToData(request,data,toAmd)
-            }
-        ).then(success,failure).catch(failure);
-    }
-    parseResult(request:Request,data:any,toAmd:boolean){
-        var atta:Request[] = [];
-        var str = JSON.stringify(data, (key, value) => {
-            if(isIRequest(value)){
-                if (toAmd) {
-                    let tempUrl = value.controller;
-                    return 'import!' + this.toUrl(value, toAmd);
-                } else {
-                    atta.push((value instanceof Request)?value:new Request(request,value.controller,value.action,value.path,value.args));
-                    return 'import!req://' + (atta.length-1);
-                }
-            }else if(isIViewTpl(value)){
-                if (toAmd) {
-                    return 'import!' + this.toUrl(value, toAmd);
-                } else {
-                    return 'import!view://' + value.path;
-                }
-            }else if(isIViewRenderer(value)){
-                return ['import!^',{template:value.template,data:value.data},'import!$'];
-            }else if(isIViewSource(value)){
-                return ['import!^',{template:value.source.template,data:value.source.data},'import!$'];
-            }else{
-                return value;
-            }
-        });
-        str = str.replace(/\["import!\^",/g,'r("'+IViewRendererNamespace+'",').replace(/,"import!\$"\]/g,")");
-        
-        var deps = {}, i = 0;
-        var args0 = ['renderer'], args1 = ['r'];
-        str = str.replace(/"import!(.+?)"/g, function ($0, $1) {
-            if (!deps[$1]) {
-                deps[$1] = "$" + i;
-                i++;
-            }
-            return deps[$1];
-        });
-        for (let url in deps) {
-            args0.push(url);
-            args1.push(deps[url]);
-        }
-
-        let fbody = 'return '+ str;
-        args1.push(fbody);
-
-        return { deps: args0, callback: new Function(...args1), atta: atta };
-    }
-    renderToData(request:Request, data:any, toAmd:boolean, success?: (str: string) => void, failure?: (error: Error) => void): Promise<any>{
-        return new Promise((resolve:(data:any)=>void, reject:(error:Error)=>void)=>{
-            let {deps, callback, atta} = this.parseResult(request, data, toAmd);
-            if (toAmd) {
-                if (deps.length) {
-                    resolve('define(["' + deps.join('","') + '"],' + callback.toString() + ');');
-                } else {
-                    resolve('define(' + callback.toString() + ');');
-                }
-            } else {
-                let depsValue = deps.map((url)=>{
-                    if (url == 'renderer') {
-                        return this._renderer;
-                    } else if (url.startsWith("view://")) {
-                        return this._views.getView(url) || url + ' not found!';
-                    } else if (url.startsWith("req://")) {
-                        let index = parseInt(url.substr("req://".length));
-                        return this.executeRequestToData(atta[index], true, toAmd);
-                    } else {
-                        return this.loadUrl(url);
+                if(data instanceof AMD){
+                    if(toAmd){
+                        let funs:string = 'define('+(data.id?'"'+data.id+'",':'');
+                        if(data.dependencies.length){
+                            if(typeof data.callback == 'function'){
+                                let arr = data.callback.toString().match(/(^[^(]+\()([^)]+)([^{]+\{)([\s\S]+$)/);
+                                if(arr){
+                                    let oargs = arr[2].split(',');
+                                    let args:string[] = [];
+                                    let deps:string[] = data.dependencies.map(function(item,index){
+                                        if(typeof item == "string"){
+                                            return item;
+                                        }else if(item instanceof Request){
+                                            return item.toUrl(true,false);
+                                        }else{
+                                            args.push(oargs[index] + '=' + JSON.stringify(item));
+                                            return '';
+                                        }
+                                    })
+                                    args.push("");
+                                    funs += JSON.stringify(deps)+",";
+                                    funs += arr[1]+arr[2]+arr[3]+"\r\n"+args.join(";\r\n")+arr[4];
+                                }
+                            }else{
+                                funs += JSON.stringify(data.callback)
+                            }
+                        }else{
+                            funs += (typeof data.callback == 'function')?data.callback.toString():JSON.stringify(data.callback)
+                        }
+                        return funs;
+                    }else{
+                         define(data.id, data.dependencies, data.callback);
+                         return amdCaches['.'];
                     }
-                })
-                Promise.all(depsValue).then(function (values: any[]) {
-                    resolve(callback(...values));
-                }).catch(function (error) {
-                    reject(error);
-                })
+                }else{
+                    if(toAmd){
+                        return 'define('+JSON.stringify(data)+')';
+                    }else{
+                        return data;
+                    }
+                }
             }
-        }).then(success,failure).catch(failure);
-        
-    }
-    loadUrl(url: string): Promise<any> | any {
-        return '111';
+        ).then(success,failure);
     }
     
     entrance(req: IHttpRequest, res: http.ServerResponse,  resolve: (data:any) => void, reject: (error: Error) => void){
@@ -458,35 +526,35 @@ export class Core {
         delete request.args.__rq__;
         this.executeRequestToData(request, false, amd ,resolve, reject);
     }
-    MEntrance(req: IHttpRequest, res: http.ServerResponse, next: (error?: Error) => void){
-        this.entrance(req, res, function(result){
-            res.end(result);
-        },next);
-    }
-    toUrl(request: IRequest | IViewTpl, toAmd:boolean): string {
-        if (request instanceof ViewTpl) {
-            return request.path + ".js";
-        } else {
-            if(!request.url){
-                let pathStr:string;
-                pathStr = request.controller;
-                if (request.path) {
-                    pathStr += '/' + request.path;
-                }
-                pathStr += "/";
-                let args = {};
-                switch (request.action) {
-                    case "Item":
-                    case "ItemList":
-                        let obj = this.getAction(request.controller, request.action, true);
-                        if (obj && obj.controller['__args_'+obj.action]) {
-                            args = obj.controller['__args_'+obj.action](request.args,request);
-                        }
-                        break;
-                }
-                request.url = url.format({ pathname: pathStr, query: request.args });
+    
+    toUrl(request: Request, toAmd?:boolean, noArgs?:boolean): string {
+        if(!request.url){
+            let pathStr:string;
+            pathStr = request.controller;
+            if (request.path) {
+                pathStr += '/' + request.path;
             }
-            return request.url;       
+            pathStr += "/";
+            let args = {};
+            switch (request.action) {
+                case "Item":
+                case "ItemList":
+                    let obj = this.getAction(request.controller, request.action, true);
+                    if (obj && obj.controller['__args_'+obj.action]) {
+                        args = obj.controller['__args_'+obj.action](request.args,request);
+                    }
+                    break;
+            }
+            request.url = url.format({ pathname: pathStr, query: request.args });
+        }
+        let str = request.url;
+        if(noArgs){
+            str = str.split("?")[0];
+        }
+        if(toAmd){
+            return str+(str.indexOf("?")>-1?"&":"?")+"__rq__=amd";  
+        }else{
+            return str;
         }
     }
 
@@ -529,6 +597,7 @@ export class Core {
     
 
 }
+
 
 
 
