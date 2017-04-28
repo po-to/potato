@@ -13,9 +13,7 @@ export interface IHttpRequest extends http.IncomingMessage{
     body : {[key:string]:any},
     routing : {controller:string, action:string, path:string, args:any}
 }
-export interface IViews {
-    getView(con: string): string | null;
-}
+
 export interface IControllers {
     getController(con: string): Controller | null;
 }
@@ -348,7 +346,6 @@ function requireAmd(id:string):any|Promise<any>{
 
 export class Core {
 
-    protected readonly _views: IViews;
     protected readonly _controllers: IControllers;
     
     routing(str: string, method: string, data?: any): {controller:string, action:string, path:string, args:any} | null {

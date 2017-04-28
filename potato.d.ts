@@ -11,9 +11,6 @@ export interface IHttpRequest extends http.IncomingMessage {
         args: any;
     };
 }
-export interface IViews {
-    getView(con: string): string | null;
-}
 export interface IControllers {
     getController(con: string): Controller | null;
 }
@@ -79,7 +76,6 @@ export declare function setConfig(options: {
     };
 }): void;
 export declare class Core {
-    protected readonly _views: IViews;
     protected readonly _controllers: IControllers;
     routing(str: string, method: string, data?: any): {
         controller: string;
