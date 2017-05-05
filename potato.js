@@ -247,7 +247,7 @@ function define(...args) {
                 if (item instanceof Request) {
                     return core.executeRequestToData(item, true, false);
                 }
-                else if (typeof item == "string") {
+                else if (typeof item == "string" && item) {
                     return requireAmd(item);
                 }
                 else {
@@ -307,7 +307,13 @@ let amdSandbox = vm.createContext({ define: define, requireAmd: requireAmd, amdC
 function requireAmd(id) {
     for (let key in amdPaths) {
         if (id.startsWith(key)) {
-            id = id.replace(key, amdPaths[key]);
+            let oid = amdPaths[key];
+            if (typeof oid == "string") {
+                id = id.replace(key, oid);
+            }
+            else {
+                id = oid(id);
+            }
         }
     }
     if (amdCaches[id]) {
@@ -456,7 +462,13 @@ class Core {
             else {
                 reject(new Error('404'));
             }
-        }).then(success, failure);
+        }).then(function (data) {
+            success && success(data);
+            return data;
+        }, function (error) {
+            failure && failure(error);
+            return error;
+        });
     }
     executeRequestToData(request, internal, toAmd, success, failure) {
         return this.executeRequest(request, internal).then((data) => {
@@ -508,7 +520,13 @@ class Core {
                     return data;
                 }
             }
-        }).then(success, failure);
+        }).then(function (data) {
+            success && success(data);
+            return data;
+        }, function (error) {
+            failure && failure(error);
+            return error;
+        });
     }
     entrance(req, res, resolve, reject) {
         let { controller, action, path, args } = req.routing;

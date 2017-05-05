@@ -265,7 +265,7 @@ function define(...args){
             let deps = dependencies.map((item)=>{
                 if(item instanceof Request){
                     return core.executeRequestToData(item, true, false);
-                }else if(typeof item == "string"){
+                }else if(typeof item == "string" && item){
                     return requireAmd(item);
                 }else{
                     return item;
@@ -305,11 +305,11 @@ define['amd'] = true;
 
 let core:Core;
 let amdCaches:{[id:string]:any|Promise<any>} = {};
-let amdPaths:{[key:string]:string} = {};
+let amdPaths:{[key:string]:(id:string)=>string|string} = {};
 
 export function setConfig(options:{
     core?:Core,
-    amdPaths?:{[key:string]:string},
+    amdPaths?:{[key:string]:(id:string)=>string|string},
     amdCaches?:{[key:string]:any}
 }){
     if(options.core){core = options.core};
@@ -321,7 +321,13 @@ let amdSandbox = vm.createContext({ define: define, requireAmd:requireAmd, amdCa
 function requireAmd(id:string):any|Promise<any>{
     for(let key in amdPaths){
         if(id.startsWith(key)){
-            id = id.replace(key,amdPaths[key]);
+            let oid = amdPaths[key];
+            if(typeof oid == "string"){
+                id = id.replace(key,oid);
+            }else{
+                id = oid(id);
+            }
+            
         }
     }
     if(amdCaches[id]){
@@ -448,7 +454,7 @@ export class Core {
         return true;
     }
     executeRequest<T>(request: Request, internal:boolean, success?: (data:T) => void, failure?: (error: Error) => void): Promise<T> {
-        return new Promise((resolve:(data:any)=>void, reject:(error:Error)=>void)=>{
+        return new Promise((resolve:(data:T)=>void, reject:(error:Error)=>void)=>{
             let obj = this.getAction(request.controller, request.action, internal);
             if (obj) {
                 //request.beCache = obj.controller.__beCache(request);
@@ -465,7 +471,13 @@ export class Core {
             } else {
                 reject(new Error('404'));
             }
-        }).then(success,failure);
+        }).then(function(data){
+            success && success(data);
+            return data;
+        },function(error){
+            failure && failure(error);
+            return error;
+        });
     }
     executeRequestToData<T>(request: Request, internal:boolean, toAmd:boolean, success?: (data:T) => void, failure?: (error: Error) => void): Promise<T> {
         return this.executeRequest<any>(request,internal).then(
@@ -512,7 +524,13 @@ export class Core {
                     }
                 }
             }
-        ).then(success,failure);
+        ).then(function(data){
+            success && success(data);
+            return data;
+        },function(error){
+            failure && failure(error);
+            return error;
+        });
     }
     
     entrance(req: IHttpRequest, res: http.ServerResponse,  resolve: (data:any) => void, reject: (error: Error) => void){
