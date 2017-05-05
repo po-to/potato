@@ -69,7 +69,7 @@ export declare class AMD {
 export declare function setConfig(options: {
     core?: Core;
     amdPaths?: {
-        [key: string]: (id: string) => string | string;
+        [key: string]: string | ((id: string) => string);
     };
     amdCaches?: {
         [key: string]: any;

@@ -305,11 +305,11 @@ define['amd'] = true;
 
 let core:Core;
 let amdCaches:{[id:string]:any|Promise<any>} = {};
-let amdPaths:{[key:string]:(id:string)=>string|string} = {};
+let amdPaths:{[key:string]:string | ((id:string)=>string)} = {};
 
 export function setConfig(options:{
     core?:Core,
-    amdPaths?:{[key:string]:(id:string)=>string|string},
+    amdPaths?:{[key:string]:string | ((id:string)=>string)},
     amdCaches?:{[key:string]:any}
 }){
     if(options.core){core = options.core};
