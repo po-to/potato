@@ -1,10 +1,10 @@
 {
-  "name": "@po-to/tomato",
-  "version": "0.1.0",
-  "description": "The web interaction framework for browser",
+  "name": "@po-to/potato",
+  "version": "0.0.1",
+  "description": "A server's framework of view controller that serve to clent",
   "homepage": "http://www.po-to.org",
-  "main": "tomato.js",
-  "types": "tomato.d.ts",
+  "main": "potato.js",
+  "types": "potato.d.ts",
   "scripts": {
     "start": "gulp"
   },
@@ -12,20 +12,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/po-to/tomato"
+    "url": "https://github.com/po-to/potato"
   },
   "dependencies": {},
   "devDependencies": {
-    "@types/cookie": "^0.1.29",
-    "@types/node": "^6.0.49",
-    "@types/request": "0.0.36",
-    "gulp": "^3.9.1",
-    "gulp-rename": "^1.2.2",
-    "gulp-typedoc": "^2.0.2",
-    "gulp-typescript": "^3.1.5",
-    "gulp-uglify": "^2.1.0",
-    "merge2": "^1.0.3",
-    "typedoc": "^0.5.7",
-    "typescript": "^2.2.1"
   }
 }
