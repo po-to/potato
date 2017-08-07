@@ -39,6 +39,7 @@ export interface IController {
     UpdateList?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
     CreateList?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
     DeleteList?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
+    Action?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
 }
 
 export interface ICore {
