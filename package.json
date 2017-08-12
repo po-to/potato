@@ -1,6 +1,6 @@
 {
   "name": "@po-to/potato",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A server's framework of view controller that serve to clent",
   "homepage": "http://www.po-to.org",
   "main": "potato.js",

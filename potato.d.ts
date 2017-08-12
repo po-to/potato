@@ -31,6 +31,7 @@ export interface IController {
     __args_UpdateList?(ars: {[key: string]: any}, request: IRequest): { [key: string]: any };
     __args_CreateList?(ars: {[key: string]: any}, request: IRequest): { [key: string]: any };
     __args_DeleteList?(ars: {[key: string]: any}, request: IRequest): { [key: string]: any };
+    __args_Action?(ars: {[key: string]: any}, request: IRequest): { [key: string]: any };
     Item?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
     Update?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
     Create?(request: IRequest, args: any, resolve: (data: any) => void, reject: (error: Error) => void);
